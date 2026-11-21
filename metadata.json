@@ -1,0 +1,8 @@
+{
+  "name": "Remix Concordia OS1",
+  "description": "Interface visuelle de type 'bureau mobile' pour orchestrer le repo Astro Concordia.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
