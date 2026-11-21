@@ -1,49 +1,229 @@
 # Concordia OS
 
-**Concordia OS** est un environnement de travail web qui permet de piloter visuellement un dépôt **Astro** depuis une interface inspirée d'un système d'exploitation. Il regroupe les outils de gestion de contenu, de données, de traduction, de design et de prévisualisation du site dans un même espace.
+> **Concordia OS** est un cockpit web de développement et d'administration pour un projet Astro. Il réunit dans une interface de type bureau les outils qui servent à gérer le contenu du site, les données PostgreSQL, les traductions, les médias, le design system, la configuration et le cycle de développement.
 
-> Concordia OS est l'interface d'administration et de développement du site Astro géré. Le dépôt Astro cible est cloné dans le dossier `concordia_repo/` au démarrage du serveur.
+- **Application :** React + TypeScript, servie par Express et Vite.
+- **Dépôt piloté :** un dépôt Astro séparé, cloné dans `concordia_repo/`.
+- **Interface :** bureau responsive avec lanceur d'applications et mode téléphone simulé.
+- **Langue de cette documentation :** français.
 
-## Fonctionnalités
+---
 
-- **Office CMS** — gestion du contenu et des entrées de données (seeds).
-- **Workspace** — exécution de scripts, build et lancement de l'aperçu Astro.
-- **Postgres** — exploration des tables et exécution de requêtes SQL via PGlite.
-- **Data** — consultation des schémas, migrations et seeds.
-- **i18n** — gestion des dictionnaires de traduction et de leur utilisation.
-- **Design** — consultation et gestion des tokens, thèmes et composants.
-- **Images** — bibliothèque de médias et téléversement d'images.
-- **Notes** — documentation et spécifications Markdown.
-- **Secrets** — configuration des variables d'environnement et des connexions à la base de données.
-- **Settings** — paramètres du dépôt Astro, configuration et dépendances.
+## Sommaire
 
-L'interface propose une vue poste de travail ainsi qu'une vue mobile simulée.
+- [Vue d'ensemble](#vue-densemble)
+- [Applications intégrées](#applications-intégrées)
+- [Architecture technique](#architecture-technique)
+- [Prérequis](#prérequis)
+- [Installation et configuration](#installation-et-configuration)
+- [Lancement et cycle de développement](#lancement-et-cycle-de-développement)
+- [Scripts npm](#scripts-npm)
+- [API HTTP](#api-http)
+- [Organisation du code](#organisation-du-code)
+- [Données et persistance](#données-et-persistance)
+- [Sécurité](#sécurité)
+- [Dépannage](#dépannage)
+- [Développement et contribution](#développement-et-contribution)
+- [Limites et points d'attention](#limites-et-points-dattention)
+- [Licence](#licence)
 
-## Stack technique
+## Vue d'ensemble
 
-| Technologie | Utilisation |
-| --- | --- |
-| React 19 | Interface utilisateur |
-| TypeScript | Typage |
-| Vite 6 | Développement et build du frontend |
-| Express 4 | Serveur applicatif et API |
-| Tailwind CSS 4 | Styles |
-| Lucide React | Icônes |
-| PGlite | Base PostgreSQL embarquée |
-| `@google/genai` | Fonctionnalités d'assistance IA côté serveur |
-| Astro | Site web administré (dépôt externe) |
+Concordia OS n'est pas le site Astro lui-même : c'est une application d'administration locale qui agit sur un dépôt Astro cible. Elle expose les outils du dépôt dans des modules spécialisés et utilise un backend Express pour les opérations qui nécessitent le système de fichiers, l'exécution de processus, PostgreSQL ou une clé API.
+
+Au démarrage, le backend prépare le dossier cible `concordia_repo/`. Si ce dossier ne contient pas encore de dépôt Git, il tente de cloner l'URL définie par `GIT_REPO_URL` ou, à défaut, `https://github.com/ishaq74/concordia.git`. Il initialise ensuite le fichier `.env` du projet cible depuis son `.env.example` lorsqu'il existe.
+
+L'interface principale propose deux présentations :
+- **Workstation / Desktop :** barre supérieure, navigation et dock latéral pour ouvrir les modules.
+- **Mobile View :** cadre de téléphone simulé avec le même lanceur d'applications.
+
+Le statut du dépôt cible (dépendances installées, présence du fichier d'environnement et serveur Astro actif) est interrogé périodiquement par l'interface.
+
+## Applications intégrées
+
+Le lanceur de `src/App.tsx` expose dix modules. Les fonctionnalités ci-dessous décrivent ce qui est implémenté dans le code de l'interface ; elles ne signifient pas qu'un dépôt Astro vierge contient déjà les fichiers ou conventions attendus.
+
+### 1. Office CMS — contenu éditorial
+
+Fichier : `src/apps/OfficeApp.tsx`
+
+- Parcourt les fichiers de données éditoriales (*seeds*) du dépôt cible.
+- Ouvre un éditeur d'entrées et de champs JSON/TypeScript.
+- Recherche des entrées et permet leur modification ou suppression.
+- Gère des groupes de traduction et les langues disponibles dans l'interface (français, anglais, espagnol, allemand, italien et arabe).
+- Permet de dupliquer une entrée vers une autre langue.
+- Propose des outils Gemini pour générer/réécrire du contenu et produire des textes alternatifs d'images.
+- Intègre un sélecteur d'images et l'envoi de médias.
+- Contient une action de publication Git (tests, synchronisation avec la branche distante et push).
+
+Le module s'appuie notamment sur les endpoints `/api/seeds-all`, `/api/seeds/:file`, `/api/gemini/*`, `/api/upload` et `/api/git/push`.
+
+### 2. Workspace — installation, scripts, build et aperçu
+
+Fichier : `src/apps/DeployApp.tsx`
+
+Onglets :
+- **Setup :** choix du gestionnaire de paquets utilisé dans le dépôt Astro.
+- **Install :** installation des dépendances du projet cible.
+- **Scripts :** lecture de `scripts` dans le `package.json` cible, sélection d'un script et ajout éventuel d'arguments.
+- **Preview :** démarrage/arrêt du serveur de développement Astro, état, logs et aperçu intégré dans une iframe. Des raccourcis de routes de langues sont proposés.
+- **Build :** exécution du script `build` du dépôt Astro.
+
+Gestionnaires proposés : `npm`, `pnpm` et `bun`. Le serveur Astro est démarré sur `127.0.0.1:4321`, puis relayé par Express sous `/preview-site` et pour les routes nécessaires à Astro/Vite.
+
+### 3. Postgres — moteur SQL
+
+Fichier : `src/apps/PgApp.tsx`
+
+- Utilise PGlite, une implémentation PostgreSQL embarquée, et son serveur socket.
+- Affiche les bases locales disponibles et la base active.
+- Permet de créer, sélectionner et supprimer des bases (la base par défaut `postgres` ne peut pas être supprimée).
+- Affiche les tables et leur structure, et permet de recharger le schéma.
+- Fournit un éditeur SQL pour exécuter des requêtes et consulter les résultats.
+- Propose des actions de gestion du schéma public, des tables et des données (dont truncate/drop).
+- Lit les scripts du projet pour faciliter les opérations liées à la base.
+- Synchronise les paramètres de base locale/test avec les variables de connexion du dépôt Astro.
+
+Le socket PostgreSQL local est exposé sur `127.0.0.1:5432`. Les bases supplémentaires sont stockées sous `concordia_repo/pg-databases/<nom>/`.
+
+### 4. Data — architecture de données
+
+Fichier : `src/apps/DataApp.tsx`
+
+Explore les conventions de dossiers du projet cible :
+- **Schemas :** fichiers `src/database/schemas/*.schema.ts`.
+- **Seeds :** fichiers `src/database/data/*.data.ts`, avec action d'exécution du script `db:seed`.
+- **Migrations :** fichiers SQL sous `src/database/migrations/*.sql`, avec actions liées aux scripts de migration, vérification, génération et comparaison.
+- **Loaders :** fichiers TypeScript sous `src/database/loaders/*.ts`.
+
+Le module filtre les fichiers, ouvre leur contenu et affiche le résultat des commandes lancées.
+
+### 5. i18n — dictionnaires de traduction
+
+Fichier : `src/apps/I18nApp.tsx`
+
+- Parcourt les dictionnaires JSON dans `src/i18n/`.
+- Présente les locales et les clés de traduction.
+- Ouvre un éditeur de dictionnaire avec recherche par clé ou valeur.
+- Aplatit les objets imbriqués pour faciliter l'édition, puis les reconstruit à l'enregistrement.
+- Permet d'ajouter, modifier et supprimer des clés.
+- Propose une traduction assistée par Gemini.
+- Recherche les usages des clés dans le code source afin d'aider à repérer les traductions utilisées ou manquantes.
+
+Les opérations de fichiers utilisent l'API filesystem ; la traduction utilise `/api/gemini/translate`.
+
+### 6. Design — design system
+
+Fichier : `src/apps/DesignApp.tsx`
+
+Onglets :
+- **Tokens :** lecture et filtrage des variables CSS, avec copie de références `var(...)`.
+- **Themes :** exploration des fichiers de thèmes et ouverture de leur code.
+- **Components :** recherche et consultation des composants du projet.
+- **Typography :** détection/présentation des familles de polices et de leurs piles CSS.
+
+Ce module est un explorateur du design system présent dans le dépôt cible ; il ne remplace pas un outil de conception graphique.
+
+### 7. Images — bibliothèque de médias
+
+Fichier : `src/apps/ImagesApp.tsx`
+
+- Parcourt la bibliothèque `public/images/`.
+- Propose une vue en grille et une vue en liste.
+- Recherche des fichiers, affiche un aperçu et permet de copier des références.
+- Permet l'envoi de plusieurs images via l'API d'upload.
+- Propose la génération de textes alternatifs avec Gemini.
+
+L'upload est limité côté serveur à dix fichiers par requête et à 10 Mo par fichier ; les extensions et types MIME image sont contrôlés.
+
+### 8. Notes — documentation du projet
+
+Fichier : `src/apps/NotesApp.tsx`
+
+- Parcourt les documents Markdown et les spécifications du dépôt.
+- Sépare les documents du projet, les guides/spécifications et les ressources visuelles (icônes/diagrammes).
+- Filtre les fichiers par nom ou chemin.
+- Affiche les documents Markdown et les images dans un lecteur intégré.
+
+### 9. Secrets — variables d'environnement
+
+Fichier : `src/apps/EnvApp.tsx`
+
+- Consulte et modifie les variables du fichier `.env` du dépôt Astro.
+- Permet de révéler/masquer les valeurs et d'ajouter ou supprimer des variables.
+- Identifie les clés qui ressemblent à des secrets.
+- Présente les réglages de routage PostgreSQL local/test.
+- Permet de synchroniser les URLs de connexion et les indicateurs d'environnement avec le gestionnaire PGlite.
+- Donne accès au redémarrage du serveur Astro.
+
+**Attention :** ce module manipule des valeurs sensibles. Ne partage pas de captures d'écran ou de logs qui affichent des secrets et ne versionne jamais un fichier `.env`.
+
+### 10. Settings — configuration du projet
+
+Fichier : `src/apps/SettingsApp.tsx`
+
+- Résume la configuration Astro (`astro.config.mjs`) et le mode de sortie.
+- Affiche les locales déclarées dans la configuration Astro.
+- Explore les fichiers de traduction JSON.
+- Affiche les dépendances runtime et de développement du `package.json`.
+- Permet de filtrer les paquets et d'inspecter la configuration du dépôt.
+
+## Architecture technique
+
+| Couche | Technologie | Rôle |
+| --- | --- | --- |
+| UI | React 19 | Bureau, lanceur et dix modules |
+| Langage | TypeScript 5.8 | Code frontend et backend |
+| Bundler / dev middleware | Vite 6 + plugin React | HMR, compilation et middleware SPA |
+| Serveur HTTP | Express 4 | API locale et hébergement de l'interface |
+| CSS | Tailwind CSS 4 + plugin Vite | Styles utilitaires |
+| Icônes | Lucide React | Icônes des modules |
+| Mouvement | Motion | Animations d'interface |
+| Markdown | React Markdown, UIW React Markdown Editor | Lecture/édition Markdown |
+| Base embarquée | `@electric-sql/pglite` | Moteur PostgreSQL local |
+| Socket PostgreSQL | `@electric-sql/pglite-socket` | Connexion au moteur via protocole PostgreSQL |
+| Client SQL | `pg` | Client PostgreSQL |
+| IA | `@google/genai` | Génération, traduction et alt-text via backend |
+| Upload | Multer | Réception des images |
+| Proxy | http-proxy-middleware | Proxy de l'aperçu Astro |
+| Processus | Node child_process, tree-kill | Exécution contrôlée et arrêt des processus |
+
+### Schéma d'exécution
+
+```text
+Navigateur
+   │
+   ▼
+React / Vite (interface) ─────── Express :3000
+                                  │
+             ┌────────────────────┼───────────────────────┐
+             │                    │                       │
+             ▼                    ▼                       ▼
+      Fichiers de             PGlite / socket         Gemini API
+      concordia_repo/         127.0.0.1:5432          (clé serveur)
+             │
+             ▼
+      Processus Astro :4321
+             │
+             ▼
+      Proxy /preview-site
+```
+
+Le point d'entrée frontend est `src/main.tsx`, qui monte `src/App.tsx`. Le point d'entrée backend est `server.ts`.
 
 ## Prérequis
 
-- Node.js (version compatible avec les dépendances du projet)
-- npm
-- Git
-- Un accès réseau pour cloner le dépôt Astro et installer ses dépendances
-- Une clé API Gemini pour activer les fonctionnalités IA
+- Node.js et npm (versions compatibles avec les dépendances du lockfile).
+- Git accessible depuis le terminal.
+- Un accès réseau au dépôt Astro cible lors de son premier clonage.
+- Une clé Gemini valide pour les fonctions IA (facultative pour les autres modules).
+- Un environnement capable d'exécuter les dépendances natives éventuelles du projet.
 
-## Installation
+Les gestionnaires `pnpm` et `bun` sont proposés pour les opérations effectuées dans le dépôt Astro géré ; l'application elle-même est installée avec npm selon les commandes ci-dessous.
 
-Clone le dépôt puis installe les dépendances :
+## Installation et configuration
+
+### 1. Cloner Concordia OS
 
 ```bash
 git clone https://github.com/Ishaq74/ConcordiaOS.git
@@ -51,108 +231,259 @@ cd ConcordiaOS
 npm install
 ```
 
-Crée un fichier `.env` à partir du modèle :
+Le dépôt contient un `package-lock.json` et un `bun.lock`. Avec npm, `npm install` installe les dépendances de l'application.
+
+### 2. Configurer l'environnement de l'application
 
 ```bash
 cp .env.example .env
 ```
 
-Configure ensuite les variables nécessaires :
+Le modèle versionné contient :
 
-```env
-GEMINI_API_KEY=your_gemini_api_key
-APP_URL=http://localhost:3000
-```
+| Variable | Rôle |
+| --- | --- |
+| `GEMINI_API_KEY` | Clé API lue par le backend pour les fonctionnalités Gemini. |
+| `APP_URL` | URL de l'application hôte ; utile dans l'environnement de déploiement qui fournit cette valeur. |
 
-- `GEMINI_API_KEY` — clé utilisée par le serveur pour les requêtes Gemini. Elle ne doit pas être exposée dans le bundle frontend.
-- `APP_URL` — URL publique de l'application lorsqu'elle est déployée. En local, utilise généralement `http://localhost:3000`.
+Renseigne au minimum `GEMINI_API_KEY` si tu souhaites utiliser les fonctions IA. Garde les valeurs réelles dans un fichier local non versionné ou dans le gestionnaire de secrets de la plateforme.
 
-Le dépôt Astro géré est configuré via `GIT_REPO_URL`. Si cette variable n'est pas définie, le serveur utilise par défaut :
+### 3. Configurer le dépôt Astro piloté
 
-```
+Le serveur lit `GIT_REPO_URL` dans l'environnement du processus Node. Si elle est absente, il utilise :
+
+```text
 https://github.com/ishaq74/concordia.git
 ```
 
-Au premier démarrage, le serveur tente de cloner ce dépôt dans `concordia_repo/`, d'installer ses dépendances et de préparer son fichier `.env` à partir de `.env.example` lorsqu'il est disponible.
+Exemple de lancement avec un dépôt différent :
 
-## Démarrage
+```bash
+GIT_REPO_URL=https://github.com/mon-compte/mon-site-astro.git npm run dev
+```
 
-Lance le serveur de développement :
+Au premier lancement, `server.ts` :
+1. vérifie si `concordia_repo/.git` existe ;
+2. si nécessaire, clone le dépôt cible dans `concordia_repo/` ;
+3. tente d'installer ses dépendances avec la commande de bootstrap intégrée ;
+4. copie `concordia_repo/.env.example` vers `concordia_repo/.env` si ce dernier n'existe pas.
+
+Le dépôt cible doit être accessible en lecture par Git. Pour un dépôt privé, configure l'authentification Git dans l'environnement qui exécute le serveur.
+
+### 4. Lancer l'application
 
 ```bash
 npm run dev
 ```
 
-Ouvre ensuite [http://localhost:3000](http://localhost:3000).
+Puis ouvre [http://localhost:3000](http://localhost:3000).
 
-Le serveur Express sert l'application React/Vite et expose les API internes. Le serveur de développement Astro est lancé séparément depuis l'espace **Workspace**, sur le port `4321`; son aperçu est relayé par l'application.
+Le dossier `concordia_repo/` est créé automatiquement au démarrage si le clonage réussit. Si tu souhaites préparer manuellement ses dépendances depuis l'interface, ouvre **Workspace → Install**.
 
-## Scripts disponibles
+## Lancement et cycle de développement
 
-| Commande | Description |
+### Ports
+
+| Port | Adresse d'écoute | Usage |
+| --- | --- | --- |
+| `3000` | `0.0.0.0` | Serveur Express et application web |
+| `4321` | `127.0.0.1` | Serveur de développement Astro, lancé à la demande |
+| `5432` | `127.0.0.1` | Socket PostgreSQL PGlite, base active |
+
+Le port du serveur Express est défini par la constante `PORT` dans `server.ts`. Le port Astro est fourni à la commande de lancement depuis Workspace. Le serveur PostgreSQL interne est redémarré lors d'un changement de base active.
+
+### Aperçu Astro
+
+1. Ouvre le module **Workspace**.
+2. Sélectionne le gestionnaire de paquets à utiliser.
+3. Va dans **Install** et lance l'installation si les dépendances du dépôt cible sont absentes.
+4. Va dans **Preview**, puis démarre le serveur Astro.
+5. Consulte les logs et ouvre la route souhaitée dans l'aperçu intégré.
+
+Le proxy Express relaie notamment `/preview-site`, les assets Astro/Vite et les préfixes de langues `/ar`, `/es`, `/fr` et `/en`.
+
+### Build et publication
+
+- **Build :** Workspace exécute le script `build` du `package.json` du dépôt Astro.
+- **Publication CMS :** l'action de publication de l'Office CMS appelle `/api/git/push`. Le backend lance d'abord le script de test `test:all` du dépôt cible ; en cas d'échec, la publication est interrompue. Il synchronise ensuite la branche `main` avec le dépôt distant et pousse les changements.
+
+La publication concerne le dépôt Astro géré, pas le dépôt ConcordiaOS.
+
+## Scripts npm
+
+Scripts définis dans le `package.json` de Concordia OS :
+
+| Commande | Effet |
 | --- | --- |
-| `npm run dev` | Démarre le serveur applicatif avec `tsx server.ts`. |
+| `npm run dev` | Lance `tsx server.ts` : backend Express et middleware Vite en développement. |
 | `npm run build` | Compile le frontend avec Vite dans `dist/`. |
-| `npm run preview` | Lance l'aperçu du build Vite. |
-| `npm run lint` | Vérifie les types TypeScript avec `tsc --noEmit`. |
+| `npm run preview` | Lance le serveur de prévisualisation Vite du build frontend. |
+| `npm run setup` | Exécute `npm install` dans `concordia_repo/` (le dossier cible doit exister). |
 | `npm run clean` | Supprime le dossier `dist/`. |
+| `npm run lint` | Lance `tsc --noEmit` pour vérifier les types TypeScript. |
 
-## Architecture
+Script utilitaire présent :
+- `node scripts/test-pglite.mjs` : test manuel de PGlite utilisant `pg-data` et un socket sur le port `5433`. Ce script est un utilitaire de test, pas le démarrage normal du serveur.
+
+À noter : `npm run build` compile le frontend Vite. Le serveur Express reste un processus Node séparé ; ce script ne produit pas à lui seul un bundle autonome du backend.
+
+## API HTTP
+
+Les routes suivantes sont définies dans `server.ts`. Elles constituent l'API interne utilisée par les modules React.
+
+| Méthode | Route | Fonction |
+| --- | --- | --- |
+| GET | `/api/system-status` | État du dépôt cible : dépendances, fichier .env et serveur Astro. |
+| GET | `/api/dev-server/logs` | Retourne les logs et l'état du serveur Astro. |
+| POST | `/api/dev-server/logs/clear` | Efface les logs en mémoire. |
+| POST | `/api/dev-server` | Démarre, arrête ou interroge le serveur Astro (`action`). |
+| GET | `/api/pg-databases` | Liste les bases locales, la base active et le routage .env. |
+| POST | `/api/pg-databases` | Crée, bascule, supprime une base ou synchronise les variables d'environnement. |
+| POST | `/api/pg-query` | Exécute une requête SQL sur une base PGlite. |
+| POST | `/api/upload` | Reçoit des images et les place dans la bibliothèque du dépôt cible. |
+| POST | `/api/gemini/generate` | Génère du contenu éditorial (modes contrôlés par le backend). |
+| POST | `/api/gemini/alt-text` | Produit un texte alternatif à partir d'une image. |
+| POST | `/api/gemini/translate` | Traduit des dictionnaires ou du contenu CMS. |
+| GET | `/api/fs/read` | Lit un fichier texte ou liste le contenu d'un dossier. |
+| GET | `/api/fs/raw` | Sert un fichier brut (notamment les images). |
+| POST | `/api/fs/write` | Écrit un fichier texte, avec sauvegarde optionnelle. |
+| POST | `/api/fs/delete` | Supprime un fichier (pas un dossier). |
+| GET | `/api/fs/scan` | Retourne l'inventaire des fichiers du dépôt cible. |
+| GET | `/api/seeds-all` | Charge les fichiers de seeds et retourne leurs entrées. |
+| GET | `/api/seeds/:file` | Lit un fichier de seed autorisé. |
+| POST | `/api/seeds/:file` | Met à jour le tableau exporté d'un fichier de seed. |
+| POST | `/api/script-runner` | Exécute une commande autorisée dans le dépôt cible. |
+| GET | `/api/package-scripts` | Retourne les scripts du package.json cible. |
+| POST | `/api/git/push` | Lance les tests et la procédure de publication Git. |
+
+Les endpoints sont destinés à l'application et à son environnement de confiance. Ils ne constituent pas une API publique avec authentification multi-utilisateur intégrée.
+
+## Organisation du code
 
 ```text
 ConcordiaOS/
 ├── src/
-│   ├── apps/             # Applications et modules de l'interface
-│   ├── components/       # Composants partagés
-│   ├── App.tsx           # Bureau et lanceur d'applications
-│   └── main.tsx          # Point d'entrée React
-├── scripts/              # Scripts utilitaires
-├── pg-data/              # Données locales éventuelles
-├── server.ts             # Serveur Express, API et orchestration Astro
-├── vite.config.ts        # Configuration Vite
-├── package.json          # Dépendances et scripts npm
-├── .env.example          # Modèle de configuration
-└── concordia_repo/       # Dépôt Astro géré (créé au démarrage)
+│   ├── apps/
+│   │   ├── DataApp.tsx       # Schémas, seeds, migrations, loaders
+│   │   ├── DeployApp.tsx     # Installation, scripts, build, preview
+│   │   ├── DesignApp.tsx     # Tokens, thèmes, composants, typo
+│   │   ├── EnvApp.tsx        # Variables .env et routage DB
+│   │   ├── I18nApp.tsx       # Dictionnaires et usages des clés
+│   │   ├── ImagesApp.tsx     # Bibliothèque et upload
+│   │   ├── NotesApp.tsx      # Docs, guides et ressources
+│   │   ├── OfficeApp.tsx     # CMS, seeds, traduction et publication
+│   │   ├── PgApp.tsx         # Administration SQL PGlite
+│   │   └── SettingsApp.tsx   # Configuration Astro et dépendances
+│   ├── components/
+│   │   └── UiFeedback.tsx    # Toasts, confirmations et prompts
+│   ├── hooks/
+│   │   ├── useFs.ts          # Accès fichiers et exécution de commandes
+│   │   └── usePackageManager.ts # Choix npm/pnpm/bun et construction des commandes
+│   ├── App.tsx               # Bureau, lanceur et navigation
+│   ├── index.css             # Styles globaux
+│   └── main.tsx              # Montage React
+├── scripts/
+│   └── test-pglite.mjs       # Test manuel du serveur PGlite
+├── pg-data/                  # Répertoire de données PostgreSQL présent dans le dépôt
+├── server.ts                 # Express, endpoints, PGlite, Gemini, proxy Astro
+├── vite.config.ts            # Configuration Vite, React et Tailwind
+├── index.html                # Document HTML racine et métadonnées
+├── package.json              # Scripts et dépendances
+├── package-lock.json         # Verrouillage des dépendances npm
+├── bun.lock                  # Verrouillage Bun
+├── tsconfig.json             # Configuration TypeScript
+├── .env.example              # Modèle des variables de l'application
+└── walkthrough.md            # Compte-rendu de sécurité et vérifications
 ```
 
-### Fonctionnement général
+### Fichiers importants
 
-1. Express démarre sur le port `3000`.
-2. Au lancement, `server.ts` vérifie la présence du dépôt Astro et tente de le cloner si nécessaire.
-3. Les modules de l'interface communiquent avec les API Express pour lire et modifier les fichiers du dépôt géré, gérer les données et lancer les outils.
-4. Le serveur Astro de développement fonctionne sur le port `4321`; l'application relaie les routes nécessaires à l'aperçu.
-5. Les appels Gemini passent par le backend, qui lit `GEMINI_API_KEY` depuis l'environnement serveur.
+- `src/App.tsx` : déclare le catalogue des dix applications et gère les vues desktop/mobile.
+- `src/hooks/useFs.ts` : centralise les appels filesystem, lecture, écriture, suppression et exécution de commandes.
+- `src/hooks/usePackageManager.ts` : mémorise le gestionnaire de paquets choisi et construit les commandes adaptées.
+- `src/components/UiFeedback.tsx` : fournit les notifications, boîtes de confirmation et boîtes de saisie.
+- `server.ts` : initialise le dépôt cible, le moteur PGlite, les endpoints Express et le proxy Astro.
+- `walkthrough.md` : documente les corrections de sécurité et les scénarios de vérification décrits dans le dépôt.
+
+## Données et persistance
+
+### Dépôt Astro cible
+
+Les modules travaillent principalement dans `concordia_repo/`. Les modifications de fichiers, seeds, dictionnaires, médias et configurations concernent ce dossier.
+
+### Bases PGlite
+
+- Base par défaut : `concordia_repo/pg-data/`.
+- Bases nommées : `concordia_repo/pg-databases/<nom>/`.
+- Le nom de base est limité à 1–63 caractères parmi les lettres, chiffres, tiret bas et tiret.
+- La base `postgres` ne peut pas être supprimée par l'API.
+- La base active est exposée par le socket local sur le port `5432`.
+
+### Fichiers et secrets
+
+Les fichiers `.env` de l'application et du dépôt Astro ont des rôles distincts :
+- `ConcordiaOS/.env` configure le processus Concordia OS (Gemini et paramètres de l'hôte).
+- `concordia_repo/.env` configure le site Astro et ses connexions de données.
+
+Ne copie pas les secrets de l'un vers l'autre sans raison et ne publie jamais leurs valeurs.
 
 ## Sécurité
 
-Le serveur intègre notamment plusieurs protections :
+Le dépôt inclut un compte-rendu dédié dans [`walkthrough.md`](./walkthrough.md). Les protections documentées dans le code comprennent notamment :
 
-- exécution de commandes sans interpréteur shell, avec liste d'autorisation ;
-- restriction des chemins de fichiers au dépôt Astro géré ;
-- protection des répertoires sensibles tels que `.git`, `node_modules`, `pg-data` et `pg-databases` contre les modifications via l'API ;
-- validation des noms de bases et des fichiers de seeds ;
-- validation des URL distantes et blocage des adresses IP privées pour la récupération d'images ;
-- limites de taille et validation des fichiers téléversés ;
-- utilisation de la clé Gemini uniquement côté serveur.
+- **Commandes :** utilisation de `execFile` sans shell, allowlist de commandes, validation des arguments et restrictions sur les appels Node inline.
+- **Chemins :** résolution des chemins à l'intérieur de `concordia_repo/`, rejet des traversées de répertoires et protection de `.git`, `node_modules`, `pg-data` et `pg-databases` contre les écritures/suppressions via l'API.
+- **Bases :** validation stricte des noms de bases et des noms de fichiers/exportations de seeds.
+- **Requêtes distantes :** validation des URL HTTP(S), résolution DNS et blocage des hôtes/adresses IP privés pour les fonctions qui récupèrent des images.
+- **Upload :** contrôle des types/extensions d'images, limite de taille et génération de noms de fichiers sûrs.
+- **Gemini :** la clé est lue côté serveur par `getGeminiClient()`; les appels IA transitent par les endpoints backend.
+- **Réponses HTTP :** en-tête `X-Content-Type-Options: nosniff`.
 
-Ne commit jamais de fichier `.env`, de clé API ou d'autre secret.
+Ces mesures réduisent des classes de risques, mais ne remplacent pas une authentification, une isolation réseau et une revue de sécurité avant une exposition publique. L'application permet de lire/écrire des fichiers et d'exécuter des scripts dans le dépôt cible : ne l'expose pas directement à Internet sans couche d'accès et durcissement adaptés.
 
 ## Dépannage
 
-- **Le dépôt Astro ne se clone pas :** vérifie l'accès réseau, les droits Git et la valeur de `GIT_REPO_URL`.
-- **L'aperçu Astro ne démarre pas :** vérifie que les dépendances de `concordia_repo/` sont installées et consulte les logs dans **Workspace**.
-- **Les fonctionnalités IA échouent :** vérifie que `GEMINI_API_KEY` est défini dans l'environnement du serveur.
-- **Le port est déjà utilisé :** libère le port `3000` pour Concordia OS ou adapte la configuration du serveur.
+| Problème | Vérifications |
+| --- | --- |
+| Le serveur ne démarre pas | Vérifie la version de Node, `npm install`, le port `3000` et les logs du terminal. |
+| Le dépôt cible n'apparaît pas | Vérifie `GIT_REPO_URL`, l'accès Git et les droits de clonage. Le dossier attendu est `concordia_repo/`. |
+| Le clonage a réussi mais Astro ne démarre pas | Vérifie `concordia_repo/node_modules`, le gestionnaire choisi et les logs de Workspace → Preview. |
+| L'aperçu affiche une erreur | Vérifie que le serveur Astro est actif sur `127.0.0.1:4321` et que la route demandée existe. |
+| Les fonctions Gemini échouent | Vérifie `GEMINI_API_KEY` dans l'environnement du processus backend et consulte la réponse de l'API. |
+| La base ne répond pas | Vérifie le statut PGlite, la base active et la disponibilité du port local `5432`. |
+| Une commande de projet échoue | Vérifie qu'elle existe dans le `package.json` cible et que le gestionnaire sélectionné correspond au lockfile. |
 
-## Contribution
+## Développement et contribution
 
-Les contributions sont les bienvenues :
+1. Fork le dépôt et crée une branche dédiée.
+2. Installe les dépendances de Concordia OS avec `npm install`.
+3. Configure l'accès au dépôt Astro cible.
+4. Lance `npm run dev`.
+5. Après tes changements, vérifie les types et le build :
 
-1. Fork le dépôt.
-2. Crée une branche dédiée à ta modification.
-3. Effectue tes changements et vérifie-les avec `npm run lint` et `npm run build`.
-4. Ouvre une Pull Request en décrivant clairement les changements.
+```bash
+npm run lint
+npm run build
+```
+
+6. Décris le périmètre, les tests effectués et les éventuelles modifications d'API dans ta Pull Request.
+
+Lors de l'ajout d'un module :
+- crée le composant dans `src/apps/` ;
+- ajoute son import et son entrée dans `APPS` dans `src/App.tsx` ;
+- utilise les hooks et le composant de feedback partagés si nécessaire ;
+- ajoute les endpoints backend correspondants dans `server.ts` uniquement si une opération serveur est requise ;
+- documente les nouvelles variables, routes et dépendances dans ce README.
+
+## Limites et points d'attention
+
+- Le dépôt Astro cible est séparé de Concordia OS et doit respecter les conventions de dossiers que les modules explorent (`src/database`, `src/i18n`, `public/images`, fichiers de thèmes et composants).
+- Les fonctionnalités IA nécessitent une clé Gemini et un accès réseau.
+- Le serveur est configuré pour un usage local/de confiance ; aucune authentification utilisateur n'est implémentée dans les routes API décrites.
+- `npm run build` compile l'interface Vite, pas un bundle autonome du serveur Express.
+- Le dépôt contient actuellement un dossier `pg-data/` correspondant à des fichiers de données PostgreSQL. Ces fichiers sont des données d'exécution, pas du code source : évite de versionner des états locaux, dumps, journaux ou fichiers de verrouillage de base. Vérifie les règles de sauvegarde avant toute suppression ou migration de ces données.
+- Le script `scripts/test-pglite.mjs` ouvre une base sur le port `5433` et écoute sur `0.0.0.0` ; ne l'utilise pas comme serveur de production.
 
 ## Licence
 
-Aucune licence n'est actuellement déclarée dans le dépôt. Tous droits réservés par défaut ; contacte l'auteur avant toute réutilisation ou redistribution.
+Aucun fichier de licence n'est actuellement déclaré dans le dépôt. En l'absence de licence explicite, les droits restent réservés par défaut : demande l'autorisation de l'auteur avant toute réutilisation ou redistribution.
