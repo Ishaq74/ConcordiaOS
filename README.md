@@ -168,6 +168,176 @@ Fichier : `src/apps/SettingsApp.tsx`
 - Affiche les dépendances runtime et de développement du `package.json`.
 - Permet de filtrer les paquets et d'inspecter la configuration du dépôt.
 
+## Structure attendue du projet Astro à importer
+
+Cette section décrit **le dépôt cible** que Concordia OS clone dans `concordia_repo/`. Il ne s'agit pas de l'arborescence de ConcordiaOS lui-même.
+
+Concordia OS peut ouvrir un dépôt Astro existant, mais ses modules sont conçus autour de conventions de fichiers précises. Un projet Astro standard peut démarrer sans toutes ces conventions ; en revanche, les panneaux correspondants resteront vides ou certaines actions ne seront pas disponibles tant que les dossiers, fichiers et scripts attendus n'existent pas.
+
+### Arborescence conseillée
+
+Voici une structure de référence compatible avec les explorateurs et les opérations de Concordia OS. Les noms marqués « convention Concordia » sont les emplacements reconnus directement par l'application.
+
+```text
+mon-projet-astro/
+├── package.json                    # Indispensable : scripts et dépendances du site
+├── astro.config.mjs                # Indispensable pour le panneau Settings
+├── .env                            # Variables du site (local, non versionné)
+├── .env.example                    # Modèle de variables, recommandé
+├── .gitignore
+├── README.md
+├── public/
+│   ├── images/                     # Convention Concordia : bibliothèque Images/CMS
+│   ├── fonts/                      # Optionnel : polices locales
+│   └── favicon.svg                 # Optionnel : favicon du site
+├── src/
+│   ├── components/                 # Convention Concordia : composants .astro/.tsx/.ts
+│   │   ├── layout/
+│   │   └── ui/
+│   ├── layouts/                     # Layouts Astro du site
+│   ├── pages/                       # Routes Astro
+│   │   ├── index.astro
+│   │   └── [...lang]/               # Exemple de routes localisées, selon le projet
+│   ├── styles/
+│   │   ├── global.css               # Feuille globale, si utilisée par le site
+│   │   └── components/              # Convention Concordia : fichiers CSS de thèmes
+│   │       ├── colors.css
+│   │       ├── spacing.css
+│   │       ├── components.css
+│   │       └── typography.css
+│   ├── i18n/                        # Convention Concordia : dictionnaires JSON par locale
+│   │   ├── fr.json
+│   │   ├── en.json
+│   │   └── es.json
+│   └── database/                    # Convention Concordia : ressources de données
+│       ├── schemas/
+│       │   └── example.schema.ts
+│       ├── data/
+│       │   └── example.data.ts
+│       ├── migrations/
+│       │   └── 001_initial.sql
+│       └── loaders/
+│           └── example.ts
+├── docs/                            # Documentation libre (Markdown/MDX)
+└── .github/
+    └── instructions/                # Guides et specs Markdown facultatifs
+```
+
+Les dossiers `layouts/`, `pages/`, `styles/`, `docs/` et les noms de fichiers de l'exemple sont des choix d'organisation Astro usuels ou des suggestions. Les conventions effectivement scannées par Concordia OS sont détaillées ci-dessous. Adapte les exemples de routes, de composants et de configuration à l'architecture réelle de ton site.
+
+### Éléments nécessaires au fonctionnement du site importé
+
+| Élément | Niveau | Pourquoi |
+| --- | --- | --- |
+| `package.json` valide | Obligatoire | Concordia OS y lit les scripts et dépendances, et Workspace les exécute. |
+| `astro.config.mjs` | Requis pour Settings | Le panneau Settings lit ce chemin précis pour afficher la configuration Astro et les locales. |
+| Dépendances installables | Obligatoire pour Preview/Build | Le serveur Astro ne peut pas démarrer correctement sans les dépendances du projet cible. |
+| Script `dev` | Recommandé | Commande habituelle pour lancer Astro en développement ; le Workspace démarre le serveur du projet. |
+| Script `build` | Requis pour l'action Build | Le panneau Workspace exécute le script `build` déclaré dans `package.json`. |
+| Fichier `.env` | Selon le projet | Nécessaire si le site ou ses outils consomment des variables d'environnement. |
+| Fichier `.env.example` | Fortement recommandé | Concordia OS le copie vers `.env` lorsqu'il prépare le dépôt et qu'aucun `.env` n'existe. |
+
+Exemple minimal indicatif de scripts dans le `package.json` du site (à fusionner avec les dépendances et scripts réellement utilisés par ton projet) :
+
+```json
+{
+  "scripts": {
+    "dev": "astro dev --host 127.0.0.1 --port 4321",
+    "build": "astro build",
+    "preview": "astro preview",
+    "db:seed": "tsx scripts/seed.ts",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "test:all": "npm run lint && npm run test"
+  }
+}
+```
+
+Les scripts `db:seed`, `db:migrate` et `test:all` ne sont pas obligatoires pour un site Astro minimal. Ils deviennent nécessaires si tu veux utiliser les actions correspondantes de Data, Postgres ou de publication CMS. Adapte leurs commandes à l'outillage réellement installé dans le dépôt cible ; Concordia OS ne génère pas automatiquement les migrations ni les scripts métier manquants.
+
+### Conventions reconnues par chaque module
+
+| Module Concordia OS | Chemin attendu dans le dépôt importé | Format / règle |
+| --- | --- | --- |
+| Office CMS | `src/database/data/` | Fichiers nommés `<nom>.data.ts`. Chaque fichier doit exporter un tableau JavaScript/TypeScript. L'API privilégie un export dont le nom se termine par `Seed`, sinon prend le premier export tableau. |
+| Data — Schemas | `src/database/schemas/` | Fichiers `*.schema.ts`. |
+| Data — Seeds | `src/database/data/` | Fichiers `*.data.ts`, mêmes conventions d'export tableau que l'Office CMS. |
+| Data — Migrations | `src/database/migrations/` | Fichiers SQL `*.sql`. |
+| Data — Loaders | `src/database/loaders/` | Fichiers TypeScript `*.ts`. |
+| i18n | `src/i18n/` | Un fichier JSON par locale, par exemple `fr.json`, `en.json`. Le contenu doit être un objet JSON ; les objets imbriqués sont pris en charge. |
+| Design — Tokens | `src/styles/` | Le panneau Tokens lit les fichiers CSS `colors.css`, `spacing.css`, `components.css` et `typography.css` à cet emplacement. Les variables CSS sont détectées à partir de déclarations personnalisées (`--nom: valeur`). |
+| Design — Themes | `src/styles/components/` | Fichiers CSS `*.css`, présentés comme thèmes. |
+| Design — Components | `src/components/` | Composants `*.astro`, `*.tsx` et `*.ts`. |
+| Images | `public/images/` | Images du site. Les formats reconnus incluent JPG, PNG, WebP, SVG, GIF et AVIF selon les vues ; l'upload applique ses propres contrôles de type et de taille. |
+| Notes — Documentation | N'importe quel dossier du dépôt | Fichiers `.md` et `.mdx`, hors `.github/` dans l'onglet Project Docs. |
+| Notes — Guides | `.github/` | Fichiers Markdown/MDX affichés dans l'onglet Guides & Specs. |
+| Notes — Icônes et diagrammes | N'importe quel dossier sauf `public/images/` | Fichiers SVG, PNG, JPG, WebP et GIF. |
+| Settings | Racine du dépôt | `package.json` et `astro.config.mjs`. Les scripts et dépendances sont lus depuis le package. |
+| Secrets | Racine du dépôt | `.env` et, en secours, `.env.example`. Les variables de base de données sont synchronisées selon les noms reconnus par le backend. |
+| Workspace | Racine du dépôt | `package.json`, ses scripts et le lockfile du gestionnaire choisi. |
+
+### Exemple de fichier seed compatible avec Office CMS
+
+Le fichier doit se trouver sous `src/database/data/`, porter le suffixe `.data.ts` et exporter un tableau. Exemple de structure (les champs métier dépendent de ton application) :
+
+```ts
+export const exampleSeed = [
+  {
+    id: "example-001",
+    title: "Exemple de contenu",
+    description: "Entrée de démonstration à remplacer par ton contenu."
+  }
+];
+```
+
+Le nom de l'export `exampleSeed` suit la convention la plus simple pour le lecteur de seeds. Les objets peuvent avoir des propriétés métier différentes ; les formulaires CMS construisent leurs champs à partir des propriétés des entrées. Garde des identifiants stables et évite de mélanger des structures incompatibles dans un même tableau.
+
+### Exemple de dictionnaire i18n
+
+Chaque locale est un fichier JSON distinct. Les clés peuvent être imbriquées :
+
+```json
+{
+  "common": {
+    "home": "Accueil",
+    "contact": "Contact"
+  },
+  "navigation": {
+    "about": "À propos"
+  }
+}
+```
+
+Les fichiers doivent être du JSON valide. Les clés d'une locale à l'autre devraient rester cohérentes pour faciliter la recherche d'usages et la traduction.
+
+### Exemple de variables d'environnement
+
+Le fichier `.env.example` du projet Astro sert de modèle. Les noms ci-dessous sont illustratifs : conserve ceux réellement lus par ton site et ses scripts.
+
+```dotenv
+NODE_ENV=development
+DATABASE_URL_LOCAL=postgresql://user:password@localhost:5432/postgres
+DATABASE_URL_TEST=postgresql://user:password@localhost:5432/concordia_test
+```
+
+Ne commit jamais le vrai `.env`. Les champs de routage PostgreSQL utilisés par l'interface doivent correspondre aux variables attendues par le backend et par le code du site ; vérifie les noms déjà présents dans ton projet avant de les renommer.
+
+### Vérification avant import
+
+Avant de renseigner `GIT_REPO_URL` ou de laisser le serveur cloner ton projet, vérifie :
+
+- [ ] Le dépôt Git est accessible depuis la machine qui exécute Concordia OS.
+- [ ] Le `package.json` est présent et son JSON est valide.
+- [ ] `astro.config.mjs` existe si tu veux utiliser le panneau Settings.
+- [ ] Les scripts `dev` et `build` sont définis et fonctionnent dans le dépôt cible.
+- [ ] Le gestionnaire de paquets choisi correspond au lockfile du dépôt.
+- [ ] Le fichier `.env.example` documente toutes les variables nécessaires sans contenir de secrets réels.
+- [ ] Les dossiers de conventions sont créés pour les modules que tu comptes utiliser.
+- [ ] Les fichiers `.data.ts` exportent bien des tableaux.
+- [ ] Les dictionnaires `.json` sont valides.
+- [ ] Les chemins de migrations, composants, thèmes et médias respectent exactement la casse et les emplacements indiqués ci-dessus.
+
+**Important :** ces chemins sont des conventions consommées par le code actuel de Concordia OS, pas un générateur de projet. L'import/clonage ne crée pas automatiquement les pages Astro, les composants, les schémas, les migrations, les dictionnaires ni les scripts métier. Commence par importer un projet Astro fonctionnel, puis ajoute les dossiers optionnels correspondant aux modules que tu veux exploiter.
+
 ## Architecture technique
 
 | Couche | Technologie | Rôle |
